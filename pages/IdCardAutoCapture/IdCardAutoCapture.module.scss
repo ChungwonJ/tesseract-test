@@ -1,3 +1,5 @@
+/* IdCardAutoCapture.module.scss */
+
 /* === 전체 오버레이 === */
 .overlay {
   position: fixed;
@@ -8,6 +10,20 @@
   align-items: center;
   justify-content: center;
   overflow: hidden;
+}
+
+/* === 루트 레이아웃(카메라 영역 + OCR 패널) === */
+/* JSX: <div className={styles.layout}> ... </div> */
+.layout {
+  display: grid;
+  grid-template-columns: 1fr; /* 기본: 패널 숨김 또는 모바일 */
+  gap: 12px;
+  width: 100%;
+  height: 100%;
+  align-items: stretch;
+}
+.layoutWithSide { /* JSX: 패널이 보일 때 layout 대신 layout + layoutWithSide 조합 */
+  grid-template-columns: 1fr minmax(260px, 360px);
 }
 
 /* === 비디오 === */
@@ -41,7 +57,9 @@
 
 .aligned {
   border-color: #4ade80;
-  box-shadow: 0 0 0 99999px rgba(0, 0, 0, 0.88), 0 0 24px 2px rgba(74, 222, 128, 0.6);
+  box-shadow:
+    0 0 0 99999px rgba(0, 0, 0, 0.88),
+    0 0 24px 2px rgba(74, 222, 128, 0.6);
 }
 
 /* === 닫기 버튼 === */
@@ -128,7 +146,83 @@
   border-color: #fff;
 }
 
+/* === OCR 패널(우측/모바일 하단) === */
+/* JSX: <aside className={styles.ocrPanel}> ... */
+.ocrPanel {
+  background: rgba(0, 0, 0, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 12px;
+  padding: 12px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  min-height: 0; /* flex 컨테이너에서 스크롤 영역 잘리기 방지 */
+}
+
+/* 헤더 + 진행배지 */
+/* JSX: <div className={styles.ocrHeader}><strong>OCR 미리보기</strong> <span className={styles.badge}>...</span></div> */
+.ocrHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+
+  strong {
+    font-weight: 700;
+  }
+}
+
+.badge {
+  font-size: 12px;
+  padding: 2px 6px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+/* 텍스트 박스 */
+/* JSX: <div className={styles.ocrBox}> ... </div> */
+.ocrBox {
+  flex: 1;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.4;
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  padding: 8px;
+
+  mark {
+    background: #f59e0b; /* amber-500 */
+    color: #111;
+    border-radius: 3px;
+    padding: 0 2px;
+  }
+}
+
+/* 상태 라인(패턴 일치 여부 등) */
+/* JSX: <div className={styles.ocrStatus}> ... </div> */
+.ocrStatus {
+  margin-top: 8px;
+  font-size: 12px;
+  opacity: 0.9;
+}
+
 /* 반응형 보정 */
+@media (max-width: 820px) {
+  .layout,
+  .layoutWithSide {
+    grid-template-columns: 1fr; /* 모바일에서는 아래로 쌓이기 */
+    gap: 10px;
+  }
+
+  .ocrPanel {
+    min-height: 160px;
+  }
+}
+
 @media (max-width: 480px) {
   .frame {
     width: 88vw;
