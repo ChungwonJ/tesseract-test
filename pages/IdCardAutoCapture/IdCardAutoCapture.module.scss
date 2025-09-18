@@ -210,6 +210,14 @@
   opacity: 0.9;
 }
 
+.stage {
+  position: relative;   /* ★ 이게 핵심: 절대배치들의 기준이 됨 */
+  width: 100%;
+  height: 100%;
+  min-height: 0;        /* 그리드/플렉스 내에서 높이 계산 꼬임 방지 */
+  overflow: hidden;     /* 필요시 */
+}
+
 /* 반응형 보정 */
 @media (max-width: 820px) {
   .layout,

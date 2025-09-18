@@ -737,33 +737,20 @@ export default function IdCardAutoCapture({
         height: '100%',
         alignItems: 'stretch'
       }}>
-        <div style={{ position: 'relative' }}>
-          {!capturedDataUrl ? (
-            <>
-              <video ref={videoRef} className={styles.video} playsInline muted autoPlay />
-              <div className={styles.frameWrap}>
-                <div
-                  ref={frameRef}
-                  className={`${styles.frame} ${isAligned && !glareBlocked ? styles.aligned : ''}`}
-                  aria-hidden
-                  style={{ aspectRatio: `${(85.6 / 53.98).toFixed(3)}` }} // ID-1 카드 비율
-                />
-                <div className={styles.hintTop}>
-                  {hintText}
-                  {showDebug && <div className={styles.debug}>{debugInfo}</div>}
-                </div>
-              </div>
-            </>
-          ) : (
-            <>
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img className={styles.preview} src={capturedDataUrl} alt="미리보기" />
-              <div className={styles.actions}>
-                <button className={styles.buttonGhost} onClick={retake}>다시 찍기</button>
-                <button className={styles.buttonPrimary} onClick={handleUpload}>업로드</button>
-              </div>
-            </>
-          )}
+        <div className={styles.stage}>
+          <video ref={videoRef} className={styles.video} playsInline muted autoPlay />
+          <div className={styles.frameWrap}>
+            <div
+              ref={frameRef}
+              className={`${styles.frame} ${isAligned && !glareBlocked ? styles.aligned : ''}`}
+              aria-hidden
+              style={{ aspectRatio: `${(85.6 / 53.98).toFixed(3)}` }}
+            />
+            <div className={styles.hintTop}>
+              {hintText}
+              {showDebug && <div className={styles.debug}>{debugInfo}</div>}
+            </div>
+          </div>
         </div>
 
         {/* 우측(하단): OCR 미리보기 패널 */}
