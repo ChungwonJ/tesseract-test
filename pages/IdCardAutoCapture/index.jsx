@@ -165,9 +165,10 @@ export default function IdCardAutoCapture({
   onUpload,
   facingMode = 'environment',
   showDebug = false,
+  /** ↓↓↓ OCR 옵션 ↓↓↓ */
   ocrLang = 'eng+kor',
-  ocrCheckPattern = JUMIN_REGEX, // null이면 패턴 검사 없이 통과
-  onOcrText, // 선택: OCR 텍스트 콜백({ text })
+  ocrCheckPattern = JUMIN_REGEX,   // null이면 패턴 검사 없이 통과
+  onOcrText,                       // 추출 텍스트 콜백({ text })
 }) {
   const videoRef = useRef(null);
   const streamRef = useRef(null);
@@ -181,11 +182,12 @@ export default function IdCardAutoCapture({
   const [ready, setReady] = useState(false);
   const [isAligned, setIsAligned] = useState(false);
   const [capturedDataUrl, setCapturedDataUrl] = useState(null);
+  const [debugInfo, setDebugInfo] = useState('');
 
   const [glareRatio, setGlareRatio] = useState(0);
   const [glareBlocked, setGlareBlocked] = useState(false);
 
-  const [ocrLoading, setOcrLoading] = useState(false); // ★ 블랙 스피너 표시용
+  const [ocrText, setOcrText] = useState(''); // ★ OCR 텍스트 상태 (오버레이에 표시)
 
   const stableCountRef = useRef(0);
   const capturingRef = useRef(false);
@@ -257,7 +259,7 @@ export default function IdCardAutoCapture({
     setCapturedDataUrl(null);
     setGlareRatio(0);
     setGlareBlocked(false);
-    setOcrLoading(false);
+    setOcrText(''); // ★ 닫을 때 OCR 오버레이 초기화
     stableCountRef.current = 0;
     capturingRef.current = false;
     onClose?.();
@@ -465,7 +467,7 @@ export default function IdCardAutoCapture({
 
   /* ---- detection loop ---- */
   const detectLoop = useCallback(() => {
-    if (!isOpen || !ready || capturedDataUrl || ocrLoading) return;
+    if (!isOpen || !ready || capturedDataUrl) return;
 
     const video = videoRef.current;
     const frameEl = frameRef.current;
@@ -508,17 +510,75 @@ export default function IdCardAutoCapture({
     const tolPx = Math.max(2, Math.round(Math.min(w, h) * TOL_PCT));
     const scanStep = Math.max(1, Math.round(tolPx / 10));
 
-    function scanSide(getOutIn, scanLen, step) {
+    function scanTop() {
       let bestCov = 0, bestD = 0;
       for (let d = -tolPx; d <= tolPx; d += scanStep) {
-        const { outPos, inPos } = getOutIn(d);
+        const yEdge = y + d;
+        const yOut = yEdge - off, yIn = yEdge + off;
         let hit = 0, tot = 0;
-        for (let t = 0; t < scanLen; t += step) {
-          const { ax, ay, bx, by } = inPos(t);
-          const { ax2, ay2, bx2, by2 } = outPos(t);
-          if (ax2 >= 0 && ax2 < W && ay2 >= 0 && ay2 < H && bx >= 0 && bx < W && by >= 0 && by < H) {
-            const a = getRGB(imageData, W, ax2, ay2);
-            const b = getRGB(imageData, W, bx, by);
+        for (let xx = x; xx < x + w; xx += stepX) {
+          if (yOut >= 0 && yOut < H && yIn >= 0 && yIn < H) {
+            const a = getRGB(imageData, W, xx, yOut);
+            const b = getRGB(imageData, W, xx, yIn);
+            if (diffRGB(a, b) > EDGE_DIFF) hit++;
+            tot++;
+          }
+        }
+        const cov = tot ? hit / tot : 0;
+        if (cov > bestCov) { bestCov = cov; bestD = d; }
+      }
+      return { cov: bestCov, d: bestD };
+    }
+    function scanBottom() {
+      let bestCov = 0, bestD = 0;
+      const yBase = y + h;
+      for (let d = -tolPx; d <= tolPx; d += scanStep) {
+        const yEdge = yBase + d;
+        const yOut = yEdge + off, yIn = yEdge - off;
+        let hit = 0, tot = 0;
+        for (let xx = x; xx < x + w; xx += stepX) {
+          if (yOut >= 0 && yOut < H && yIn >= 0 && yIn < H) {
+            const a = getRGB(imageData, W, xx, yOut);
+            const b = getRGB(imageData, W, xx, yIn);
+            if (diffRGB(a, b) > EDGE_DIFF) hit++;
+            tot++;
+          }
+        }
+        const cov = tot ? hit / tot : 0;
+        if (cov > bestCov) { bestCov = cov; bestD = d; }
+      }
+      return { cov: bestCov, d: bestD };
+    }
+    function scanLeft() {
+      let bestCov = 0, bestD = 0;
+      for (let d = -tolPx; d <= tolPx; d += scanStep) {
+        const xEdge = x + d;
+        const xOut = xEdge - off, xIn = xEdge + off;
+        let hit = 0, tot = 0;
+        for (let yy = y; yy < y + h; yy += stepY) {
+          if (xOut >= 0 && xOut < W && xIn >= 0 && xIn < W) {
+            const a = getRGB(imageData, W, xOut, yy);
+            const b = getRGB(imageData, W, xIn, yy);
+            if (diffRGB(a, b) > EDGE_DIFF) hit++;
+            tot++;
+          }
+        }
+        const cov = tot ? hit / tot : 0;
+        if (cov > bestCov) { bestCov = cov; bestD = d; }
+      }
+      return { cov: bestCov, d: bestD };
+    }
+    function scanRight() {
+      let bestCov = 0, bestD = 0;
+      const xBase = x + w;
+      for (let d = -tolPx; d <= tolPx; d += scanStep) {
+        const xEdge = xBase + d;
+        const xOut = xEdge + off, xIn = xEdge - off;
+        let hit = 0, tot = 0;
+        for (let yy = y; yy < y + h; yy += stepY) {
+          if (xOut >= 0 && xOut < W && xIn >= 0 && xIn < W) {
+            const a = getRGB(imageData, W, xOut, yy);
+            const b = getRGB(imageData, W, xIn, yy);
             if (diffRGB(a, b) > EDGE_DIFF) hit++;
             tot++;
           }
@@ -529,40 +589,10 @@ export default function IdCardAutoCapture({
       return { cov: bestCov, d: bestD };
     }
 
-    // 상/하/좌/우 커버리지 스캔
-    const topRes = scanSide(
-      (d) => ({
-        outPos: (t) => ({ ax2: x + t, ay2: (y + d) - off, bx2: null, by2: null }), // for bounds check
-        inPos:  (t) => ({ ax: null, ay: null, bx: x + t, by: (y + d) + off })
-      }),
-      w, stepX
-    );
-    const bottomRes = scanSide(
-      (d) => ({
-        outPos: (t) => ({ ax2: x + t, ay2: (y + h + d) + off, bx2: null, by2: null }),
-        inPos:  (t) => ({ ax: null, ay: null, bx: x + t, by: (y + h + d) - off })
-      }),
-      w, stepX
-    );
-    const leftRes = scanSide(
-      (d) => ({
-        outPos: (t) => ({ ax2: (x + d) - off, ay2: y + t, bx2: null, by2: null }),
-        inPos:  (t) => ({ ax: null, ay: null, bx: (x + d) + off, by: y + t })
-      }),
-      h, stepY
-    );
-    const rightRes = scanSide(
-      (d) => ({
-        outPos: (t) => ({ ax2: (x + w + d) + off, ay2: y + t, bx2: null, by2: null }),
-        inPos:  (t) => ({ ax: null, ay: null, bx: (x + w + d) - off, by: y + t })
-      }),
-      h, stepY
-    );
-
-    const { cov: cTop, d: dT } = topRes;
-    const { cov: cBot, d: dB } = bottomRes;
-    const { cov: cLft, d: dL } = leftRes;
-    const { cov: cRgt, d: dR } = rightRes;
+    const { cov: cTop, d: dT } = scanTop();
+    const { cov: cBot, d: dB } = scanBottom();
+    const { cov: cLft, d: dL } = scanLeft();
+    const { cov: cRgt, d: dR } = scanRight();
 
     const okAlign =
       (cTop >= SIDE_COVER_MIN) && (cBot >= SIDE_COVER_MIN) &&
@@ -579,43 +609,49 @@ export default function IdCardAutoCapture({
     const glareTooHigh = gRatio > GLARE_MAX_RATIO;
     setGlareBlocked(glareTooHigh);
 
+    if (showDebug) {
+      setDebugInfo(
+        `T:${Math.round(cTop*100)}% Δ${dT}px | B:${Math.round(cBot*100)}% Δ${dB}px | ` +
+        `L:${Math.round(cLft*100)}% Δ${dL}px | R:${Math.round(cRgt*100)}% Δ${dR}px | ` +
+        `ROI:${w}x${h} tol:${tolPx}px | glare:${(gRatio*100).toFixed(2)}%`
+      );
+    }
+
     if (okAlign && !glareTooHigh) {
       stableCountRef.current += 1;
     } else {
       stableCountRef.current = 0;
     }
 
-    // 1) 네모 안에 카드가 맞으면 → 사진을 찍는다
     if (stableCountRef.current >= STABLE_NEED && !capturingRef.current) {
       capturingRef.current = true;
       (async () => {
-        let shot = await captureBestOf(3); // 베스트 샷
-        if (!shot) {
+        // 베스트 샷 → 보정(JPEG) → OCR
+        let dataUrl = await captureBestOf(3);
+        if (!dataUrl) {
           capturingRef.current = false;
           stableCountRef.current = 0;
           rafRef.current = requestAnimationFrame(detectLoop);
           return;
         }
-
-        // 2) 사진 보정 및 OCR 전환 → 3) 블랙 스피너로 화면 제어
-        setOcrLoading(true);
-
-        const enhanced = await enhanceDataURL(shot, {
+        const enhanced = await enhanceDataURL(dataUrl, {
           targetLongSide: 1800, sharpen: 0.45, clip: 0.005
         });
-        const text = await extractTextFromDataUrl(enhanced, ocrLang);
-        onOcrText?.({ text });
 
-        // 4) 숫자6-숫자7 조건(예: 123456-1234567) 통과 시 미리보기 화면으로
+        const text = await extractTextFromDataUrl(enhanced, ocrLang);
+
+        // ★ 오버레이용 상태 업데이트
+        setOcrText(text || '');
+
+        if (onOcrText) onOcrText({ text });
+
+        // 패턴 검사(기본: 주민번호). 필요 없으면 null 전달
         const pass = ocrCheckPattern ? ocrCheckPattern.test(text) : true;
 
         if (pass) {
           setCapturedDataUrl(enhanced);
-          setOcrLoading(false);
-          // 여기서 stream은 계속 켜둬도 되지만, 미리보기 화면에서 재촬영 가능하므로 유지
         } else {
-          // 실패 시 스피너 끄고 → 다시 탐지 루프 재개
-          setOcrLoading(false);
+          // 실패 → 다시 루프
           capturingRef.current = false;
           stableCountRef.current = 0;
           rafRef.current = requestAnimationFrame(detectLoop);
@@ -625,23 +661,23 @@ export default function IdCardAutoCapture({
     }
 
     rafRef.current = requestAnimationFrame(detectLoop);
-  }, [isOpen, ready, capturedDataUrl, ocrLoading, drawVideoToWorkCanvas, ocrLang, ocrCheckPattern, onOcrText]);
+  }, [isOpen, ready, capturedDataUrl, drawVideoToWorkCanvas, showDebug, captureBestOf, ocrLang, ocrCheckPattern, onOcrText]);
 
   useEffect(() => {
-    if (!isOpen || !ready || capturedDataUrl || ocrLoading) return;
+    if (!isOpen || !ready || capturedDataUrl) return;
     stableCountRef.current = 0;
     capturingRef.current = false;
     cancelAnimationFrame(rafRef.current);
     rafRef.current = requestAnimationFrame(detectLoop);
     return () => cancelAnimationFrame(rafRef.current);
-  }, [isOpen, ready, detectLoop, capturedDataUrl, ocrLoading]);
+  }, [isOpen, ready, detectLoop, capturedDataUrl]);
 
   const retake = async () => {
     setCapturedDataUrl(null);
     setIsAligned(false);
     setGlareRatio(0);
     setGlareBlocked(false);
-    setOcrLoading(false);
+    setOcrText(''); // ★ 다시찍기 시 오버레이 초기화
     stableCountRef.current = 0;
     capturingRef.current = false;
     await restartStream();
@@ -662,12 +698,29 @@ export default function IdCardAutoCapture({
         ? (glareRatio > GLARE_WARN_RATIO ? '빛 반사가 강합니다.' : '초점 맞는 중… 손을 잠시 고정해 주세요.')
         : '신분증을 프레임에 맞춰주세요.');
 
+  // ★ 오버레이에 표시할 줄 단위 텍스트 (앞쪽 8줄만)
+  const ocrLines = (ocrText || '')
+    .split('\n')
+    .map(s => s.trim())
+    .filter(Boolean)
+    .slice(0, 8);
+
   return (
     <div className={styles.overlay} role="dialog" aria-modal="true">
+      {/* ★ OCR 텍스트 오버레이 (맨 위, 최상단 z-index) */}
+      {!!ocrLines.length && (
+        <div className={styles.ocrOverlay} aria-live="polite">
+          <ul>
+            {ocrLines.map((line, i) => (
+              <li key={i}>{line}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       <button className={styles.close} onClick={closeModal} aria-label="닫기">✕</button>
 
-      {/* 스캐닝 화면 */}
-      {!capturedDataUrl && (
+      {!capturedDataUrl ? (
         <>
           <video ref={videoRef} className={styles.video} playsInline muted autoPlay />
           <div className={styles.frameWrap}>
@@ -679,26 +732,11 @@ export default function IdCardAutoCapture({
             />
             <div className={styles.hintTop}>
               {hintText}
-              {showDebug && (
-                <div className={styles.debug}>
-                  {/* 필요 시 디버그 문자열 추가 가능 */}
-                </div>
-              )}
+              {showDebug && <div className={styles.debug}>{debugInfo}</div>}
             </div>
           </div>
-
-          {/* 3) OCR 조건 검사 동안 블랙 스피너로 화면 제어 */}
-          {ocrLoading && (
-            <div className={styles.blackSpinnerOverlay} aria-live="polite" aria-busy="true">
-              <div className={styles.spinner} />
-              <p>문자 인식 중…</p>
-            </div>
-          )}
         </>
-      )}
-
-      {/* 4) 조건 통과 시 미리보기 + 업로드 버튼 */}
-      {capturedDataUrl && (
+      ) : (
         <>
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img className={styles.preview} src={capturedDataUrl} alt="미리보기" />
