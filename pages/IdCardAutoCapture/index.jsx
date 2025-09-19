@@ -14,39 +14,16 @@ function dataURLtoFile(dataUrl, filename) {
 }
 
 /* ========= OCR helpers ========= */
-const JUMIN_REGEX = /\d{6}-\d{7}/;
-function highlightRegex(text, regex) {
-  if (!regex) return text;
-  // 여러 매치를 <mark>로 감싸서 보여주기
-  const parts = [];
-  let lastIndex = 0;
-  let m;
-  const r = new RegExp(regex.source, regex.flags.includes('g') ? regex.flags : regex.flags + 'g');
-  while ((m = r.exec(text)) !== null) {
-    const { index } = m;
-    if (index > lastIndex) parts.push(text.slice(lastIndex, index));
-    parts.push(<mark key={index} style={{ padding: '0 2px', borderRadius: 3 }}>{m[0]}</mark>);
-    lastIndex = index + m[0].length;
-  }
-  if (lastIndex < text.length) parts.push(text.slice(lastIndex));
-  return parts;
-}
-
-async function extractTextFromDataUrl(dataUrl, lang = 'eng+kor', onProgress) {
+async function extractTextFromDataUrl(dataUrl, lang = 'eng+kor') {
   try {
-    const { data: { text } } = await Tesseract.recognize(dataUrl, lang, {
-      logger: (m) => {
-        if (m?.status === 'recognizing text' && typeof onProgress === 'function') {
-          onProgress(m.progress || 0);
-        }
-      }
-    });
+    const { data: { text } } = await Tesseract.recognize(dataUrl, lang);
     return (text || '').trim();
   } catch (e) {
     console.error('OCR error:', e);
     return '';
   }
 }
+const JUMIN_REGEX = /\d{6}-\d{7}/;
 
 /* ========= Post-process (auto-levels + sharpen + resize) ========= */
 async function enhanceDataURL(
@@ -192,7 +169,6 @@ export default function IdCardAutoCapture({
   ocrLang = 'eng+kor',
   ocrCheckPattern = JUMIN_REGEX,   // null이면 패턴 검사 없이 통과
   onOcrText,                       // 추출 텍스트 콜백({ text })
-  showOcrPanel = true,             // 화면에 OCR 텍스트 패널 표시 여부
 }) {
   const videoRef = useRef(null);
   const streamRef = useRef(null);
@@ -211,8 +187,7 @@ export default function IdCardAutoCapture({
   const [glareRatio, setGlareRatio] = useState(0);
   const [glareBlocked, setGlareBlocked] = useState(false);
 
-  const [ocrText, setOcrText] = useState('');          // ★ 읽힌 텍스트 표시용
-  const [ocrProgress, setOcrProgress] = useState(0);   // ★ OCR 진행률 0~1
+  const [ocrText, setOcrText] = useState(''); // ★ OCR 텍스트 상태 (오버레이에 표시)
 
   const stableCountRef = useRef(0);
   const capturingRef = useRef(false);
@@ -284,8 +259,7 @@ export default function IdCardAutoCapture({
     setCapturedDataUrl(null);
     setGlareRatio(0);
     setGlareBlocked(false);
-    setOcrText('');
-    setOcrProgress(0);
+    setOcrText(''); // ★ 닫을 때 OCR 오버레이 초기화
     stableCountRef.current = 0;
     capturingRef.current = false;
     onClose?.();
@@ -652,9 +626,7 @@ export default function IdCardAutoCapture({
     if (stableCountRef.current >= STABLE_NEED && !capturingRef.current) {
       capturingRef.current = true;
       (async () => {
-        // 베스트 샷 → 보정(JPEG) → OCR(진행률 포함)
-        setOcrText('');
-        setOcrProgress(0);
+        // 베스트 샷 → 보정(JPEG) → OCR
         let dataUrl = await captureBestOf(3);
         if (!dataUrl) {
           capturingRef.current = false;
@@ -666,8 +638,11 @@ export default function IdCardAutoCapture({
           targetLongSide: 1800, sharpen: 0.45, clip: 0.005
         });
 
-        const text = await extractTextFromDataUrl(enhanced, ocrLang, setOcrProgress);
-        setOcrText(text);
+        const text = await extractTextFromDataUrl(enhanced, ocrLang);
+
+        // ★ 오버레이용 상태 업데이트
+        setOcrText(text || '');
+
         if (onOcrText) onOcrText({ text });
 
         // 패턴 검사(기본: 주민번호). 필요 없으면 null 전달
@@ -702,8 +677,7 @@ export default function IdCardAutoCapture({
     setIsAligned(false);
     setGlareRatio(0);
     setGlareBlocked(false);
-    setOcrText('');
-    setOcrProgress(0);
+    setOcrText(''); // ★ 다시찍기 시 오버레이 초기화
     stableCountRef.current = 0;
     capturingRef.current = false;
     await restartStream();
@@ -724,102 +698,54 @@ export default function IdCardAutoCapture({
         ? (glareRatio > GLARE_WARN_RATIO ? '빛 반사가 강합니다.' : '초점 맞는 중… 손을 잠시 고정해 주세요.')
         : '신분증을 프레임에 맞춰주세요.');
 
+  // ★ 오버레이에 표시할 줄 단위 텍스트 (앞쪽 8줄만)
+  const ocrLines = (ocrText || '')
+    .split('\n')
+    .map(s => s.trim())
+    .filter(Boolean)
+    .slice(0, 8);
+
   return (
     <div className={styles.overlay} role="dialog" aria-modal="true">
+      {/* ★ OCR 텍스트 오버레이 (맨 위, 최상단 z-index) */}
+      {!!ocrLines.length && (
+        <div className={styles.ocrOverlay} aria-live="polite">
+          <ul>
+            {ocrLines.map((line, i) => (
+              <li key={i}>{line}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       <button className={styles.close} onClick={closeModal} aria-label="닫기">✕</button>
 
-      {/* 좌측(상단): 카메라/미리보기 */}
-      <div style={{
-        display: 'grid',
-        gridTemplateColumns: capturedDataUrl || showOcrPanel ? '1fr minmax(260px, 360px)' : '1fr',
-        gap: '12px',
-        width: '100%',
-        height: '100%',
-        alignItems: 'stretch'
-      }}>
-        <div className={styles.stage}>
+      {!capturedDataUrl ? (
+        <>
           <video ref={videoRef} className={styles.video} playsInline muted autoPlay />
           <div className={styles.frameWrap}>
             <div
               ref={frameRef}
               className={`${styles.frame} ${isAligned && !glareBlocked ? styles.aligned : ''}`}
               aria-hidden
-              style={{ aspectRatio: `${(85.6 / 53.98).toFixed(3)}` }}
+              style={{ aspectRatio: `${(85.6 / 53.98).toFixed(3)}` }} // ID-1 카드 비율
             />
             <div className={styles.hintTop}>
               {hintText}
               {showDebug && <div className={styles.debug}>{debugInfo}</div>}
             </div>
           </div>
-        </div>
-
-        {/* 우측(하단): OCR 미리보기 패널 */}
-        {showOcrPanel && (
-          <aside
-            style={{
-              background: 'rgba(0,0,0,0.55)',
-              border: '1px solid rgba(255,255,255,0.15)',
-              borderRadius: 12,
-              padding: 12,
-              overflow: 'hidden',
-              display: 'flex',
-              flexDirection: 'column'
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', marginBottom: 8, gap: 8 }}>
-              <strong>OCR 미리보기</strong>
-              {ocrProgress > 0 && ocrProgress < 1 && (
-                <span style={{
-                  fontSize: 12,
-                  padding: '2px 6px',
-                  borderRadius: 8,
-                  background: 'rgba(255,255,255,0.1)'
-                }}>
-                  인식 중… {Math.round(ocrProgress * 100)}%
-                </span>
-              )}
-              {ocrProgress === 1 && (
-                <span style={{
-                  fontSize: 12,
-                  padding: '2px 6px',
-                  borderRadius: 8,
-                  background: 'rgba(255,255,255,0.1)'
-                }}>
-                  완료
-                </span>
-              )}
-            </div>
-
-            <div
-              style={{
-                flex: 1,
-                overflow: 'auto',
-                whiteSpace: 'pre-wrap',
-                wordBreak: 'break-word',
-                fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
-                fontSize: 12,
-                lineHeight: 1.4,
-                background: 'rgba(0,0,0,0.25)',
-                border: '1px solid rgba(255,255,255,0.08)',
-                borderRadius: 8,
-                padding: 8
-              }}
-            >
-              {ocrText
-                ? highlightRegex(ocrText, ocrCheckPattern || undefined)
-                : <span style={{ opacity: 0.7 }}>
-                    아직 인식된 텍스트가 없습니다. 프레임 정렬 후 자동 촬영되면 결과가 표시됩니다.
-                  </span>}
-            </div>
-
-            {ocrText && ocrCheckPattern && (
-              <div style={{ marginTop: 8, fontSize: 12, opacity: 0.9 }}>
-                패턴 일치 여부: {ocrCheckPattern.test(ocrText) ? '✅ 일치' : '❌ 불일치'}
-              </div>
-            )}
-          </aside>
-        )}
-      </div>
+        </>
+      ) : (
+        <>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img className={styles.preview} src={capturedDataUrl} alt="미리보기" />
+          <div className={styles.actions}>
+            <button className={styles.buttonGhost} onClick={retake}>다시 찍기</button>
+            <button className={styles.buttonPrimary} onClick={handleUpload}>업로드</button>
+          </div>
+        </>
+      )}
     </div>
   );
 }
