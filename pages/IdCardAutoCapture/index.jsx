@@ -202,7 +202,7 @@ export default function IdCardAutoCapture({
   const [glareRatio, setGlareRatio] = useState(0);
   const [glareBlocked, setGlareBlocked] = useState(false);
 
-  // ★ OCR 텍스트 오버레이
+  // ★ OCR 텍스트 오버레이 (UI 유지)
   const [ocrText, setOcrText] = useState('');
 
   const stableCountRef = useRef(0);
@@ -338,7 +338,6 @@ export default function IdCardAutoCapture({
   const captureCroppedHiRes = useCallback(async () => {
     const video = videoRef.current;
     const frameEl = frameRef.current;
-    theconst=0; // prevent accidental errors? (remove if not desired)
     const track = photoTrackRef.current;
     if (!video || !frameEl || !track) return null;
     if (!('ImageCapture' in window)) return null;
@@ -657,7 +656,7 @@ export default function IdCardAutoCapture({
 
         const text = await extractTextFromDataUrl(enhanced, ocrLang);
 
-        // 오버레이 표시용 원문
+        // 오버레이 표시용 원문 (유지)
         setOcrText(text || '');
         onOcrText?.({ text });
 
@@ -724,7 +723,7 @@ export default function IdCardAutoCapture({
 
   return (
     <div className={styles.overlay} role="dialog" aria-modal="true">
-      {/* ★ OCR 텍스트 오버레이 (맨 위, 최상단 z-index) */}
+      {/* ★ OCR 텍스트 오버레이 (UI 유지) */}
       {!!ocrLines.length && (
         <div className={styles.ocrOverlay} aria-live="polite">
           <ul>
