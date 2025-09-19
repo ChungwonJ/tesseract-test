@@ -25,6 +25,21 @@ async function extractTextFromDataUrl(dataUrl, lang = 'eng+kor') {
 }
 const JUMIN_REGEX = /\d{6}-\d{7}/;
 
+/* === PATCH: 주민번호 검사용 정규화 ===
+   - 다양한 유니코드 대시(– — ― 등) → 일반 '-'로 통일
+   - 모든 공백 제거(스페이스/탭/줄바꿈 등)
+   - 하이픈 없이 13자리 숫자면 6-7 경계에 '-' 삽입
+*/
+function normalizeForRRN(s = '') {
+  let t = String(s)
+    .replace(/[\u2010-\u2015‒–—―]/g, '-') // 유니코드 대시 → '-'
+    .replace(/\s+/g, '');                 // 모든 공백 제거
+  if (!t.includes('-')) {
+    t = t.replace(/^(\d{6})(\d{7})$/, '$1-$2'); // 13자리 → 6-7에 하이픈 삽입
+  }
+  return t;
+}
+
 /* ========= Post-process (auto-levels + sharpen + resize) ========= */
 async function enhanceDataURL(
   dataUrl,
@@ -187,7 +202,8 @@ export default function IdCardAutoCapture({
   const [glareRatio, setGlareRatio] = useState(0);
   const [glareBlocked, setGlareBlocked] = useState(false);
 
-  const [ocrText, setOcrText] = useState(''); // ★ OCR 텍스트 상태 (오버레이에 표시)
+  // ★ OCR 텍스트 오버레이
+  const [ocrText, setOcrText] = useState('');
 
   const stableCountRef = useRef(0);
   const capturingRef = useRef(false);
@@ -259,7 +275,7 @@ export default function IdCardAutoCapture({
     setCapturedDataUrl(null);
     setGlareRatio(0);
     setGlareBlocked(false);
-    setOcrText(''); // ★ 닫을 때 OCR 오버레이 초기화
+    setOcrText('');
     stableCountRef.current = 0;
     capturingRef.current = false;
     onClose?.();
@@ -322,6 +338,7 @@ export default function IdCardAutoCapture({
   const captureCroppedHiRes = useCallback(async () => {
     const video = videoRef.current;
     const frameEl = frameRef.current;
+    theconst=0; // prevent accidental errors? (remove if not desired)
     const track = photoTrackRef.current;
     if (!video || !frameEl || !track) return null;
     if (!('ImageCapture' in window)) return null;
@@ -640,13 +657,13 @@ export default function IdCardAutoCapture({
 
         const text = await extractTextFromDataUrl(enhanced, ocrLang);
 
-        // ★ 오버레이용 상태 업데이트
+        // 오버레이 표시용 원문
         setOcrText(text || '');
+        onOcrText?.({ text });
 
-        if (onOcrText) onOcrText({ text });
-
-        // 패턴 검사(기본: 주민번호). 필요 없으면 null 전달
-        const pass = ocrCheckPattern ? ocrCheckPattern.test(text) : true;
+        // ★ PATCH: 정규화 후 주민번호 패턴 검사
+        const normalized = normalizeForRRN(text);
+        const pass = ocrCheckPattern ? ocrCheckPattern.test(normalized) : true;
 
         if (pass) {
           setCapturedDataUrl(enhanced);
@@ -677,7 +694,7 @@ export default function IdCardAutoCapture({
     setIsAligned(false);
     setGlareRatio(0);
     setGlareBlocked(false);
-    setOcrText(''); // ★ 다시찍기 시 오버레이 초기화
+    setOcrText('');
     stableCountRef.current = 0;
     capturingRef.current = false;
     await restartStream();
